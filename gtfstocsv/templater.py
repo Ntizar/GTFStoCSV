@@ -5,8 +5,10 @@ El visor es un HTML autocontenido que:
   - Carga Leaflet + IGN WMTS para el mapa
   - Muestra rutas como polylines clickeables
   - Panel de ruta detallado con paradas y horarios
+  - Panel de parada detallado con todas las rutas y horarios
+  - Catálogo de 160 operadores NAP (cuando no hay GTFS cargado)
   - Tablas exportables a CSV (cada tabla GTFS)
-  - Botones de descarga GeoJSON/SHP por ruta
+  - Botones de descarga GeoJSON/CSV por ruta
   - Soporta carga directa de GTFS vía drag & drop
 
 Uso:
@@ -133,6 +135,18 @@ def _build_html(parser):
     kaizen_css = _get_kaizen_css()
     visor_js = _get_visor_js()
 
+    # Cargar catálogo de operadores NAP
+    operadores_path = os.path.join(os.path.dirname(__file__), "..", "operadores.json")
+    operadores_data = []
+    if os.path.exists(operadores_path):
+        try:
+            with open(operadores_path, "r", encoding="utf-8") as f:
+                operadores_data = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    operadores_json = json.dumps(operadores_data, ensure_ascii=False)
+
     return f'''<!DOCTYPE html>
 <html lang="es">
 <head>
@@ -206,6 +220,33 @@ table.kz-table td, table.kz-table th {{ padding: 4px 6px; white-space: nowrap; }
 #route-panel .panel-close {{ background: none; border: none; font-size: 1.5rem;
   cursor: pointer; color: var(--kz-gris-500); padding: 4px; line-height: 1; }}
 #route-panel .panel-body {{ padding: 16px; flex: 1; overflow-y: auto; }}
+
+/* Panel de parada (slide from right) */
+#stop-panel {{ position: fixed; top: var(--header-h); right: 0; bottom: 0;
+  width: 520px; background: white; border-left: 2px solid var(--kz-azul-claro);
+  z-index: 1600; transform: translateX(100%); transition: transform .3s ease;
+  overflow-y: auto; display: flex; flex-direction: column; }}
+#stop-panel.open {{ transform: translateX(0); }}
+#stop-panel .panel-header {{ padding: 16px; border-bottom: 1px solid var(--kz-gris-200);
+  display: flex; align-items: center; gap: 12px; background: var(--kz-azul-50); }}
+#stop-panel .panel-header h2 {{ font-size: var(--kz-text-lg); flex: 1; color: var(--kz-azul); }}
+#stop-panel .panel-close {{ background: none; border: none; font-size: 1.5rem;
+  cursor: pointer; color: var(--kz-gris-500); padding: 4px; line-height: 1; }}
+#stop-panel .panel-body {{ padding: 16px; flex: 1; overflow-y: auto; }}
+.stop-detail-kpi {{ font-size: var(--kz-text-sm); color: var(--kz-gris-600); margin-bottom: 8px; }}
+.stop-route-card {{ border: 1px solid var(--kz-gris-200); border-radius: var(--kz-radius-md);
+  margin-bottom: 10px; overflow: hidden; }}
+.stop-route-card .sr-header {{ padding: 8px 12px; display: flex; align-items: center; gap: 8px;
+  background: var(--kz-gris-50); font-weight: 500; font-size: var(--kz-text-sm); }}
+.stop-route-card .sr-body {{ padding: 8px 12px; max-height: 300px; overflow-y: auto; }}
+.stop-route-card table {{ width: 100%; border-collapse: collapse; font-size: var(--kz-text-xs); }}
+.stop-route-card table th {{ background: var(--kz-azul); color: white; padding: 4px 6px;
+  text-align: left; position: sticky; top: 0; }}
+.stop-route-card table td {{ padding: 3px 6px; border-bottom: 1px solid var(--kz-gris-100); }}
+.stop-route-card table tr:hover td {{ background: var(--kz-azul-50); }}
+.stop-route-card .no-times {{ color: var(--kz-gris-500); font-size: var(--kz-text-xs);
+  padding: 8px; text-align: center; }}
+
 .kpi-row {{ display: flex; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }}
 .kpi-box {{ flex: 1; min-width: 80px; background: var(--kz-gris-50);
   border: 1px solid var(--kz-gris-200); border-radius: var(--kz-radius-md);
@@ -261,10 +302,72 @@ table.kz-table td, table.kz-table th {{ padding: 4px 6px; white-space: nowrap; }
 .map-layer-toggle button.active {{ background: var(--kz-azul); color: white;
   border-color: var(--kz-azul); }}
 
+/* ===== CATÁLOGO NAP ===== */
+#catalog-container {{ display: block; }}
+#catalog-container.hidden {{ display: none; }}
+#gtfs-content {{ display: none; }}
+#gtfs-content.visible {{ display: block; }}
+.catalog-search {{ margin: 8px 0; }}
+.catalog-search input {{ width: 100%; padding: 8px 12px; border: 1px solid var(--kz-gris-300);
+  border-radius: var(--kz-radius-md); font-size: var(--kz-text-sm); }}
+.catalog-search input:focus {{ outline: none; border-color: var(--kz-azul); }}
+.catalog-grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+  padding: 0 0 12px; }}
+.catalog-card {{ background: white; border: 1px solid var(--kz-gris-200);
+  border-radius: var(--kz-radius-md); padding: 12px; cursor: pointer;
+  transition: all .2s ease; }}
+.catalog-card:hover {{ box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  transform: translateY(-2px); border-color: var(--kz-azul-claro); }}
+.catalog-card h4 {{ font-size: var(--kz-text-sm); font-weight: 600;
+  margin-bottom: 4px; color: var(--kz-negro); }}
+.catalog-card .catalog-org {{ font-size: var(--kz-text-xs); color: var(--kz-gris-500);
+  margin-bottom: 6px; }}
+.catalog-card .catalog-meta {{ display: flex; gap: 4px; flex-wrap: wrap; }}
+.catalog-badge {{ display: inline-block; padding: 2px 8px; border-radius: 12px;
+  font-size: 10px; font-weight: 600; }}
+.catalog-badge.bus {{ background: #e3f2fd; color: #1565c0; }}
+.catalog-badge.metro {{ background: #fce4ec; color: #c62828; }}
+.catalog-badge.tren {{ background: #e8f5e9; color: #2e7d32; }}
+.catalog-badge.aereo {{ background: #fff3e0; color: #e65100; }}
+.catalog-badge.maritimo {{ background: #e0f2f1; color: #00695c; }}
+.catalog-card .catalog-stats {{ font-size: 10px; color: var(--kz-gris-500);
+  margin-top: 6px; }}
+.catalog-card .catalog-region {{ font-size: 10px; color: var(--kz-gris-400);
+  margin-top: 2px; }}
+
+/* Detalle operador en sidebar */
+.operator-detail {{ padding: 12px; background: var(--kz-gris-50);
+  border: 1px solid var(--kz-gris-200); border-radius: var(--kz-radius-md);
+  margin-bottom: 12px; }}
+.operator-detail h3 {{ font-size: var(--kz-text-base); font-weight: 600;
+  margin-bottom: 4px; }}
+.operator-detail .op-org {{ font-size: var(--kz-text-sm); color: var(--kz-gris-500); }}
+.operator-detail .op-desc {{ font-size: var(--kz-text-sm); color: var(--kz-gris-700);
+  margin: 8px 0; padding: 8px; background: white; border-radius: var(--kz-radius-sm);
+  text-align: center; }}
+.operator-detail .op-desc strong {{ color: var(--kz-azul); }}
+.operator-detail .op-link {{ display: block; margin-top: 8px; padding: 8px 12px;
+  background: var(--kz-azul); color: white; text-align: center;
+  border-radius: var(--kz-radius-md); text-decoration: none;
+  font-size: var(--kz-text-sm); font-weight: 500; }}
+.operator-detail .op-link:hover {{ background: var(--kz-azul-700); }}
+.operator-detail .op-back {{ display: inline-block; margin-bottom: 8px;
+  padding: 4px 10px; background: none; border: 1px solid var(--kz-gris-300);
+  border-radius: var(--kz-radius-sm); cursor: pointer; font-size: var(--kz-text-xs); }}
+.operator-detail .op-back:hover {{ background: var(--kz-gris-100); }}
+
+/* Botón ver horarios en ruta */
+.btn-view-stops {{ background: none; border: 1px solid var(--kz-gris-300);
+  border-radius: 4px; padding: 2px 8px; font-size: 10px; cursor: pointer;
+  transition: all .15s; margin-left: auto; white-space: nowrap; }}
+.btn-view-stops:hover {{ background: var(--kz-azul-50); border-color: var(--kz-azul-claro); }}
+
 @media (max-width: 768px) {{
   #sidebar {{ width: 100%; z-index: 1500; }}
   #map {{ left: 0; }}
   #route-panel {{ width: 100%; }}
+  #stop-panel {{ width: 100%; }}
+  .catalog-grid {{ grid-template-columns: 1fr; }}
 }}
 </style>
 </head>
@@ -294,22 +397,40 @@ table.kz-table td, table.kz-table th {{ padding: 4px 6px; white-space: nowrap; }
     <!-- Stats -->
     <div id="stats-bar"></div>
 
-    <!-- Search -->
-    <div class="search-box">
-      <input type="text" id="search-input" placeholder="🔍 Buscar rutas..." oninput="filterRoutes(this.value)">
+    <!-- CATÁLOGO NAP (visible cuando no hay GTFS cargado) -->
+    <div id="catalog-container">
+      <div class="section-title"><span>📋 Catálogo NAP</span></div>
+      <div class="catalog-search">
+        <input type="text" id="catalog-search-input" placeholder="🔍 Buscar operador, organización o región..." oninput="filterCatalog(this.value)">
+      </div>
+      <div id="catalog-operators">
+        <div class="catalog-grid" id="catalog-grid"></div>
+      </div>
+      <div id="catalog-detail" style="display:none"></div>
+      <div style="font-size:var(--kz-text-xs);color:var(--kz-gris-400);text-align:center;padding:8px">
+        {len(operadores_data)} operadores de transporte · <a href="#" onclick="showCatalog()">Ver catálogo</a>
+      </div>
     </div>
 
-    <!-- Route List -->
-    <div class="section-title">
-      <span>📋 Rutas</span>
-      <button class="kz-btn kz-btn-sm kz-btn-ghost btn-export" onclick="exportTableCSV(window._routesData, 'rutas')">CSV</button>
-    </div>
-    <div id="route-list"></div>
+    <!-- GTFS CONTENT (visible cuando hay datos cargados) -->
+    <div id="gtfs-content">
+      <!-- Search -->
+      <div class="search-box">
+        <input type="text" id="search-input" placeholder="🔍 Buscar rutas..." oninput="filterRoutes(this.value)">
+      </div>
 
-    <!-- Tables accordion -->
-    <div style="margin-top: 12px;">
-      <div class="section-title"><span>📊 Datos GTFS</span></div>
-      <div id="tables-accordion"></div>
+      <!-- Route List -->
+      <div class="section-title">
+        <span>📋 Rutas</span>
+        <button class="kz-btn kz-btn-sm kz-btn-ghost btn-export" onclick="exportTableCSV(window._routesData, 'rutas')">CSV</button>
+      </div>
+      <div id="route-list"></div>
+
+      <!-- Tables accordion -->
+      <div style="margin-top: 12px;">
+        <div class="section-title"><span>📊 Datos GTFS</span></div>
+        <div id="tables-accordion"></div>
+      </div>
     </div>
 
   </div>
@@ -324,6 +445,15 @@ table.kz-table td, table.kz-table th {{ padding: 4px 6px; white-space: nowrap; }
   <div class="panel-body" id="panel-body"></div>
 </div>
 
+<!-- STOP DETAIL PANEL -->
+<div id="stop-panel">
+  <div class="panel-header">
+    <h2 id="stop-panel-title">Parada</h2>
+    <button class="panel-close" onclick="closeStopPanel()">✕</button>
+  </div>
+  <div class="panel-body" id="stop-panel-body"></div>
+</div>
+
 <!-- TOAST -->
 <div class="toast" id="toast"></div>
 
@@ -335,8 +465,16 @@ table.kz-table td, table.kz-table th {{ padding: 4px 6px; white-space: nowrap; }
 const COLORS = ['#1A4488','#CB1823','#3463AC','#6B96CF','#2d6a4f','#e67e22','#8e44ad','#16a085','#c0392b','#2980b9'];
 const ROUTE_TYPES = {{'0':'🚊 Tranvía','1':'🚇 Metro','2':'🚆 Tren','3':'🚌 Bus','4':'🚍 Ferry','5':'🚃 Tranvía','6':'🚡 Teleférico','7':'🚞 Funicular','11':'🚐 Bus','100':'🚄 Tren','109':'🚄 AVE','200':'🚌 Bus'}};
 
+const CATALOG_TYPES = {{'Autobús':'🚌','Aéreo':'✈️','Ferroviario':'🚆','Marítimo':'🚢'}};
+const CATALOG_ICONS = {{'Autobús':'bus','Aéreo':'aereo','Ferroviario':'tren','Marítimo':'maritimo'}};
+
+const OPERADORES = {operadores_json};
+
 let map, routeLayers = {{}}, activeRouteId = null, allRoutes = [], allStops = [];
 let allShapes = {{}}, routeShapeMap = {{}};
+let routesByStop = {{}}, stopsByRoute = {{}};
+let stopMarkers = [];
+
 const ignGris = L.tileLayer('https://www.ign.es/wmts/ign-base?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=IGNBase-gris&STYLE=default&TILEMATRIXSET=GoogleMapsCompatible&TILEMATRIX={{z}}&TILECOL={{x}}&TILEROW={{y}}&FORMAT=image/jpeg', {{
   attribution: '© IGN — Instituto Geográfico Nacional (CC BY 4.0)', maxZoom: 19
 }});
@@ -348,9 +486,7 @@ const ignTopo = L.tileLayer('https://www.ign.es/wmts/ign-base?SERVICE=WMTS&REQUE
 function initMap() {{
   map = L.map('map', {{ center: [40.4168, -3.7038], zoom: 6, preferCanvas: true }});
   ignGris.addTo(map);
-  // Layer control
-  const layers = {{ 'IGN Gris': ignGris, 'IGN Topográfica': ignTopo }};
-  map.on('click', () => closeRoutePanel());
+  map.on('click', () => {{ closeRoutePanel(); closeStopPanel(); }});
 }}
 
 // Toast
@@ -359,6 +495,98 @@ function showToast(msg) {{
   const t = document.getElementById('toast');
   t.textContent = msg; t.classList.add('show');
   clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 3000);
+}}
+
+// ============================================================
+// CATÁLOGO NAP
+// ============================================================
+function renderCatalog(operadores) {{
+  const grid = document.getElementById('catalog-grid');
+  grid.innerHTML = operadores.map(op => {{
+    const tipo = op.tipo && op.tipo[0];
+    const tipoIcon = CATALOG_TYPES[tipo] || '🚍';
+    const tipoClass = CATALOG_ICONS[tipo] || 'bus';
+    const region = op.regiones && op.regiones.length ? op.regiones[0] : '';
+    const rutas = op.num_rutas || '?';
+    const paradas = op.num_paradas || '?';
+    const tam = op.tamanio_kb ? (op.tamanio_kb > 1000 ? (op.tamanio_kb/1000).toFixed(1)+'MB' : op.tamanio_kb+'KB') : '';
+    return `<div class="catalog-card" onclick="showOperatorDetail(${{op.id}})">
+      <h4>${{tipoIcon}} ${{op.nombre}}</h4>
+      <div class="catalog-org">${{op.organizacion || ''}}</div>
+      <div class="catalog-meta">
+        <span class="catalog-badge ${{tipoClass}}">${{tipo || ''}}</span>
+      </div>
+      <div class="catalog-stats">${{rutas}} rutas · ${{paradas}} paradas${{tam ? ' · '+tam : ''}}</div>
+      <div class="catalog-region">${{region ? '📍 '+region : ''}}</div>
+    </div>`;
+  }}).join('');
+}}
+
+function filterCatalog(query) {{
+  const q = query.toLowerCase().trim();
+  if (!q) {{ renderCatalog(OPERADORES); return; }}
+  const filtered = OPERADORES.filter(op =>
+    (op.nombre && op.nombre.toLowerCase().includes(q)) ||
+    (op.organizacion && op.organizacion.toLowerCase().includes(q)) ||
+    (op.tipo && op.tipo.some(t => t.toLowerCase().includes(q))) ||
+    (op.regiones && op.regiones.some(r => r.toLowerCase().includes(q)))
+  );
+  renderCatalog(filtered);
+}}
+
+function showOperatorDetail(id) {{
+  const op = OPERADORES.find(o => o.id === id);
+  if (!op) return;
+  const tipo = op.tipo && op.tipo[0];
+  const tipoIcon = CATALOG_TYPES[tipo] || '🚍';
+  const napUrl = `https://nap.transportes.gob.es/NAP/${{
+    op.organizacion ? encodeURIComponent(op.organizacion) : ''
+  }}/${{encodeURIComponent(op.nombre)}}`;
+  // Build NAP download link
+  const downloadUrl = `https://nap.transportes.gob.es/`;
+
+  document.getElementById('catalog-operators').style.display = 'none';
+  const detail = document.getElementById('catalog-detail');
+  detail.style.display = 'block';
+
+  const regionList = op.regiones && op.regiones.length
+    ? op.regiones.filter((r,i,a) => a.indexOf(r)===i).slice(0, 8).join(', ') + (op.regiones.length > 8 ? '...' : '')
+    : '';
+  const operadoresList = op.operadores && op.operadores.length
+    ? '<div style="margin-top:8px;font-size:var(--kz-text-xs);color:var(--kz-gris-600)">Operadores: ' + op.operadores.join(', ') + '</div>'
+    : '';
+
+  detail.innerHTML = `<div class="operator-detail">
+    <button class="op-back" onclick="showCatalog()">← Volver al catálogo</button>
+    <h3>${{tipoIcon}} ${{op.nombre}}</h3>
+    <div class="op-org">${{op.organizacion || ''}}</div>
+    <div style="margin:6px 0;display:flex;gap:4px;flex-wrap:wrap">
+      <span class="catalog-badge ${{
+        CATALOG_ICONS[tipo] || 'bus'
+      }}">${{tipo || ''}}</span>
+      <span class="stat-chip">${{op.num_rutas || '?'}} rutas</span>
+      <span class="stat-chip">${{op.num_paradas || '?'}} paradas</span>
+      ${{op.tamanio_kb ? '<span class="stat-chip">'+(
+        op.tamanio_kb > 1000 ? (op.tamanio_kb/1000).toFixed(1)+' MB' : op.tamanio_kb+' KB'
+      )+'</span>' : ''}}
+    </div>
+    ${{regionList ? '<div style="font-size:var(--kz-text-xs);color:var(--kz-gris-500);margin-bottom:8px">📍 '+regionList+'</div>' : ''}}
+    <div class="op-desc">
+      📥 <strong>Descarga el GTFS desde la NAP</strong><br>
+      y arrastra el ZIP aquí para visualizarlo
+    </div>
+    <a class="op-link" href="${{downloadUrl}}" target="_blank" rel="noopener">
+      🔗 Abrir NAP — ${{op.organizacion || op.nombre}}
+    </a>
+    ${{operadoresList}}
+  </div>`;
+}}
+
+function showCatalog() {{
+  document.getElementById('catalog-operators').style.display = 'block';
+  document.getElementById('catalog-detail').style.display = 'none';
+  document.getElementById('catalog-search-input').value = '';
+  renderCatalog(OPERADORES);
 }}
 
 // ============================================================
@@ -431,6 +659,7 @@ async function parseGTFSZip(zip, filename) {{
 
   // Build indexes
   const stopsById = {{}}; stops.forEach(s => stopsById[s.stop_id] = s);
+  const routesById = {{}}; routes.forEach(r => routesById[r.route_id] = r);
   const tripsByRoute = {{}}; trips.forEach(t => {{
     if (!tripsByRoute[t.route_id]) tripsByRoute[t.route_id] = [];
     tripsByRoute[t.route_id].push(t);
@@ -445,6 +674,38 @@ async function parseGTFSZip(zip, filename) {{
   }});
   const routeShapeMap = {{}};
   trips.forEach(t => {{ if (t.shape_id && shapesCoords[t.shape_id] && !routeShapeMap[t.route_id]) routeShapeMap[t.route_id] = t.shape_id; }});
+
+  // Build routesByStop: stop_id -> array of {{route_id, route_name, route_color, route_short_name, trip_headsign, departure_time, trip_id}}
+  const _routesByStop = {{}};
+  stopTimes.forEach(st => {{
+    const stopId = st.stop_id;
+    if (!_routesByStop[stopId]) _routesByStop[stopId] = [];
+    // Find trip and route for this stop_time
+    const trip = trips.find(t => t.trip_id === st.trip_id);
+    if (!trip) return;
+    const route = routesById[trip.route_id];
+    if (!route) return;
+    _routesByStop[stopId].push({{
+      route_id: trip.route_id,
+      route_name: route.route_long_name || route.route_short_name || trip.route_id,
+      route_short_name: route.route_short_name || '',
+      route_color: route.route_color || '',
+      route_type: route.route_type || '',
+      trip_headsign: trip.trip_headsign || '',
+      departure_time: st.departure_time || st.arrival_time || '',
+      trip_id: st.trip_id,
+      stop_sequence: parseInt(st.stop_sequence) || 0
+    }});
+  }});
+
+  // Build stopsByRoute: route_id -> array of stop_ids
+  const _stopsByRoute = {{}};
+  routes.forEach(r => {{
+    const rid = r.route_id;
+    const trips = tripsByRoute[rid] || [];
+    const orderedStops = getOrderedStops(rid, trips, stopTimesByTrip, stopsById);
+    _stopsByRoute[rid] = orderedStops.map(s => s.stop_id).filter(Boolean);
+  }});
 
   // Build routes data
   const resultRoutes = routes.map(r => {{
@@ -469,6 +730,12 @@ async function parseGTFSZip(zip, filename) {{
   }}).map(s => ({{ id: s.stop_id, name: s.stop_name, lat: parseFloat(s.stop_lat), lon: parseFloat(s.stop_lon), code: s.stop_code || '' }}));
 
   window._rawData = {{ routes, stops, trips, stopTimes, shapes, agency, calendar, calDates, frequencies, transfers, feedInfo }};
+  window._routesByStop = _routesByStop;
+  window._stopsByRoute = _stopsByRoute;
+  window._stopsById = stopsById;
+  window._routesById = routesById;
+  window._stopTimesByTrip = stopTimesByTrip;
+  window._tripsByRoute = tripsByRoute;
 
   return {{ meta: {{ filename, agency: agency.map(a => a.agency_name).filter(Boolean) }}, routes: resultRoutes, stops: resultStops, shapes: shapesCoords, route_shape_map: routeShapeMap }};
 }}
@@ -507,6 +774,10 @@ function renderAll(data) {{
   allShapes = data.shapes;
   routeShapeMap = data.route_shape_map;
   window._routesData = allRoutes;
+
+  // Swap UI: hide catalog, show GTFS content
+  document.getElementById('catalog-container').classList.add('hidden');
+  document.getElementById('gtfs-content').classList.add('visible');
 
   // Update header
   const agency = data.meta.agency.length ? data.meta.agency.join(', ') : data.meta.filename;
@@ -558,9 +829,18 @@ function renderStopsOnMap(stops) {{
     html: '<div style="width:8px;height:8px;background:#1A4488;border:2px solid #fff;border-radius:50%;box-shadow:0 1px 3px rgba(0,0,0,0.3)"></div>',
     iconSize: [8,8], iconAnchor: [4,4], className: ''
   }});
-  const markers = L.layerGroup(stops.map(s =>
-    L.marker([s.lat, s.lon], {{ icon }}).bindPopup(`<b>${{s.name}}</b><br><small>ID: ${{s.id}}</small>`)
-  ));
+  const markers = L.layerGroup();
+  stopMarkers = [];
+  stops.forEach(s => {{
+    const marker = L.marker([s.lat, s.lon], {{ icon }});
+    marker.bindPopup(
+      `<b>${{s.name}}</b><br><small>ID: ${{s.id}}${{s.code ? ' · Cód: '+s.code : ''}}</small><br>` +
+      `<a href="#" onclick="event.preventDefault();openStopPanel('${{s.id}}')" style="color:var(--kz-azul);font-size:12px;text-decoration:underline">⏰ Ver horarios de esta parada</a>`
+    );
+    marker._stopId = s.id;
+    markers.addLayer(marker);
+    stopMarkers.push(marker);
+  }});
   markers.addTo(map);
 }}
 
@@ -643,7 +923,9 @@ async function openRoute(routeId) {{
 
   const stopsHtml = stops.length
     ? `<ol class="stop-list">${{stops.map((s,i) =>
-      `<li><span class="stop-num">${{i+1}}</span><span class="stop-name">${{s.stop_name || s.stop_id}}</span><small style="color:var(--kz-gris-500)">${{s.departure_time || ''}}</small></li>`
+      `<li><span class="stop-num">${{i+1}}</span><span class="stop-name">${{s.stop_name || s.stop_id}}</span>` +
+      `<small style="color:var(--kz-gris-500)">${{s.departure_time || ''}}</small>` +
+      `<button class="btn-view-stops" onclick="event.stopPropagation();openStopPanel('${{s.stop_id}}')">⏰ Ver horarios</button></li>`
     ).join('')}}</ol>`
     : '<div class="no-data">No hay paradas ordenadas</div>';
 
@@ -666,6 +948,7 @@ async function openRoute(routeId) {{
     </div>`;
 
   document.getElementById('route-panel').classList.add('open');
+  closeStopPanel();
 }}
 
 let highlightLayer = null;
@@ -674,6 +957,140 @@ function closeRoutePanel() {{
   document.getElementById('route-panel').classList.remove('open');
   if (highlightLayer) {{ map.removeLayer(highlightLayer); highlightLayer = null; }}
   document.querySelectorAll('.route-item').forEach(el => el.classList.remove('active'));
+}}
+
+// ============================================================
+// STOP PANEL (horarios por parada)
+// ============================================================
+function openStopPanel(stopId) {{
+  closeRoutePanel();
+
+  const rbs = window._routesByStop;
+  const stopsById = window._stopsById || {{}};
+  const routesById = window._routesById || {{}};
+  const stopTimesByTrip = window._stopTimesByTrip || {{}};
+  const tripsByRoute = window._tripsByRoute || {{}};
+  const raw = window._rawData;
+
+  const stopInfo = stopsById[stopId] || allStops.find(s => s.id === stopId) || {{}};
+  const stopName = stopInfo.stop_name || stopInfo.name || stopId;
+  const stopCode = stopInfo.stop_code || '';
+  const stopLat = stopInfo.stop_lat || (stopInfo.lat || '');
+  const stopLon = stopInfo.stop_lon || (stopInfo.lon || '');
+
+  // Get all routes serving this stop
+  const entries = rbs[stopId] || [];
+
+  // Deduplicate by trip_id, keep first occurrence
+  const seen = new Set();
+  const uniqueEntries = [];
+  entries.forEach(e => {{
+    // Group by (route_id, trip_headsign)
+    const key = e.route_id + '|' + e.trip_headsign + '|' + e.departure_time;
+    if (!seen.has(key)) {{
+      seen.add(key);
+      uniqueEntries.push(e);
+    }}
+  }});
+
+  // Sort by departure_time
+  uniqueEntries.sort((a, b) => (a.departure_time || '').localeCompare(b.departure_time || ''));
+
+  // Group by route_id
+  const byRoute = {{}};
+  uniqueEntries.forEach(e => {{
+    if (!byRoute[e.route_id]) byRoute[e.route_id] = [];
+    byRoute[e.route_id].push(e);
+  }});
+
+  // Build HTML
+  const routeIds = Object.keys(byRoute).sort();
+  let routesHtml = '';
+
+  routeIds.forEach(rid => {{
+    const r = routesById[rid] || allRoutes.find(x => x.id === rid);
+    const color = r ? (r.route_color ? `#${{r.route_color}}` : '#1A4488') : '#1A4488';
+    const shortName = r ? (r.route_short_name || r.route_long_name || rid) : rid;
+    const routeName = r ? (r.route_long_name || r.route_short_name || rid) : rid;
+    const routeType = r ? (ROUTE_TYPES[r.route_type] || '🚍') : '🚍';
+    const times = byRoute[rid];
+
+    // Sort times
+    times.sort((a,b) => (a.departure_time||'').localeCompare(b.departure_time||''));
+
+    const rows = times.map(t =>
+      `<tr><td>${{t.trip_headsign || '—'}}</td><td>${{t.departure_time || '—'}}</td></tr>`
+    ).join('');
+
+    routesHtml += `<div class="stop-route-card">
+      <div class="sr-header">
+        <span class="route-badge" style="background:${{color}};width:22px;height:22px;font-size:10px">${{shortName.substring(0,2)}}</span>
+        <span>${{routeType}} ${{routeName}}</span>
+        <span style="margin-left:auto;font-size:var(--kz-text-xs);color:var(--kz-gris-500)">${{times.length}} salidas</span>
+      </div>
+      <div class="sr-body">
+        <table>
+          <thead><tr><th>Dirección</th><th>Salida</th></tr></thead>
+          <tbody>${{rows}}</tbody>
+        </table>
+      </div>
+    </div>`;
+  }});
+
+  if (!routesHtml) {{
+    routesHtml = '<div class="no-data">No hay horarios disponibles para esta parada</div>';
+  }}
+
+  const coordStr = (stopLat && stopLon) ? `${{stopLat}}, ${{stopLon}}` : '';
+
+  document.getElementById('stop-panel-title').innerHTML = `🚏 ${{stopName}}`;
+  document.getElementById('stop-panel-body').innerHTML =
+    `<div class="stop-detail-kpi">
+      <strong>ID:</strong> ${{stopId}}${{stopCode ? ' · <strong>Código:</strong> '+stopCode : ''}}${{coordStr ? ' · <strong>Coord:</strong> '+coordStr : ''}}
+    </div>
+    <div style="margin-bottom:12px;display:flex;gap:6px;flex-wrap:wrap">
+      <span class="stat-chip">${{routeIds.length}} rutas</span>
+      <span class="stat-chip">${{uniqueEntries.length}} salidas</span>
+      <button class="kz-btn kz-btn-sm kz-btn-ghost" onclick="exportStopCSV('${{stopId}}')" style="margin-left:auto">📥 CSV</button>
+    </div>
+    ${{routesHtml}}`;
+
+  document.getElementById('stop-panel').classList.add('open');
+}}
+
+function closeStopPanel() {{
+  document.getElementById('stop-panel').classList.remove('open');
+}}
+
+function exportStopCSV(stopId) {{
+  const rbs = window._routesByStop;
+  const stopsById = window._stopsById || {{}};
+  const entries = rbs[stopId] || [];
+  if (!entries.length) return showToast('⚠️ No hay datos para exportar');
+
+  const stopInfo = stopsById[stopId] || {{}};
+  const stopName = stopInfo.stop_name || stopId;
+
+  // Deduplicate
+  const seen = new Set();
+  const unique = [];
+  entries.forEach(e => {{
+    const key = e.route_id + '|' + e.trip_headsign + '|' + e.departure_time;
+    if (!seen.has(key)) {{ seen.add(key); unique.push(e); }}
+  }});
+  unique.sort((a,b) => (a.departure_time||'').localeCompare(b.departure_time||''));
+
+  const data = unique.map(e => ({{
+    parada_id: stopId,
+    parada_nombre: stopName,
+    ruta_id: e.route_id,
+    ruta_nombre: e.route_name,
+    trip_headsign: e.trip_headsign || '',
+    departure_time: e.departure_time || '',
+    trip_id: e.trip_id || ''
+  }}));
+
+  exportTableCSV(data, `horarios_${{stopId}}`);
 }}
 
 // ============================================================
@@ -758,21 +1175,8 @@ function groupBy(arr, key) {{
 // ============================================================
 initMap();
 
-// Try to load data.json (pre-generated by Python)
-(async function() {{
-  try {{
-    const resp = await fetch('data.json');
-    if (resp.ok) {{
-      const data = await resp.json();
-      console.log('📦 Datos pre-cargados:', data.meta.filename);
-      // Convert raw data format to match parseGTFSZip output
-      window._rawData = {{}};
-      renderAll(data);
-    }}
-  }} catch(e) {{
-    console.log('ℹ️ No hay data.json pre-cargado');
-  }}
-}})();
+// Render catalog on load
+renderCatalog(OPERADORES);
 </script>
 </body>
 </html>'''
