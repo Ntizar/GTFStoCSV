@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Proyecto
+output/
+data/1493_GTFS-ZIP.zip
+
+# Kaizen CSS (copia local)
+kaizen.css
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo

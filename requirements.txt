@@ -1,0 +1,7 @@
+# GTFStoCSV — Dependencias mínimas
+# pip install -r requirements.txt
+#
+# Solo pyshp es OPCIONAL (para exportar SHP).
+# El resto: zipfile, csv, json, math son de la stdlib de Python 3.
+
+pyshp>=2.3.0
